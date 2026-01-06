@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Progress</title>
+</head>
+<body>
+    <h2>Your Progress</h2>
+    {% for progress in progress %}
+        <p>{{ progress.problem_type }}: {{ progress.correct_count }}/{{ progress.attempt_count }}</p>
+    {% endfor %}
+    <a href="/">Home</a>
+</body>
+</html>

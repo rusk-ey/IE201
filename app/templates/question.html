@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <title>Practice</title>
+</head>
+<body>
+    <h2>Solve the Following</h2>
+
+    <!-- Flash messages -->
+    <div>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="flash-message {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+    </div>
+
+    <form method="POST">
+        <p><strong>{{ problem.question }}</strong></p>
+        <input type="hidden" name="correct_answer" value="{{ problem.correct_answer }}">
+        <input type="hidden" name="problem_type" value="{{ problem.problem_type }}">
+        <div>
+            {% for option in problem.options %}
+                <input type="radio" name="answer" value="{{ option }}">
+                <label>{{ option }}</label><br>
+            {% endfor %}
+        </div>
+        <button type="submit">Submit</button>
+    </form>
+
+    <!-- Solution box -->
+    {% if solution %}
+        <div class="solution-box">
+            <h3>Solution:</h3>
+            <p>{{ solution }}</p>
+        </div>
+    {% endif %}
+
+    <a href="/">Home</a>
+</body>
+</html>
