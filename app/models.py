@@ -51,6 +51,31 @@ def generate_problem():
         "problem_type": problem_type
     }
 
+
+def generate_problem_real():
+    problem_type = random.choice(['addition', 'subtraction', 'multiplication', 'division'])
+    num1, num2 = random.randint(1, 20), random.randint(1, 20)
+
+    if problem_type == "addition":
+        correct_answer = num1 + num2
+    elif problem_type == "subtraction":
+        correct_answer = num1 - num2
+    elif problem_type == "multiplication":
+        correct_answer = num1 * num2
+    elif problem_type == "division":
+        num1 = num1 * num2  # Ensure num1 is divisible by num2 for simplicity
+        correct_answer = num1 / num2
+
+    options = [correct_answer] + random.sample(range(1, 100), 3)
+    random.shuffle(options)
+
+    return {
+        "question": f"{num1} {'+' if problem_type == 'addition' else '-' if problem_type == 'subtraction' else '*' if problem_type == 'multiplication' else '/'} {num2}",
+        "correct_answer": correct_answer,
+        "options": options,
+        "problem_type": problem_type
+    }
+
 def check_answer(answer, correct_answer):
     return float(answer) == float(correct_answer)
 
