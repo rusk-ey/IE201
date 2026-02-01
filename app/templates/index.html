@@ -11,10 +11,19 @@
 </head>
 <body>
     <div class="container text-center mt-5">
-        <h1 class="text-primary">Welcome to IE201 Practice! Let's get started!</h1>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} mt-3">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <h1 class="text-primary">Welcome to the IE201 Adaptive Chapter 2 Practice Tool! Let's begin.</h1>
         <div class="mt-4">
-            <a href="/practice" class="btn btn-primary btn-lg">Start Practice</a>
-            <a href="/progress" class="btn btn-success btn-lg">View Progress</a>
+    <a href="{{ url_for('practice') }}" class="btn btn-primary btn-lg">Start Practice</a>
+    <a href="{{ url_for('interactive_table') }}" class="btn btn-secondary btn-lg">Interactive Table</a>
+    <a href="{{ url_for('progress') }}" class="btn btn-success btn-lg">View Progress</a>
         </div>
     </div>
 </body>

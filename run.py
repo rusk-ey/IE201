@@ -6,28 +6,21 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField
 from wtforms.validators import InputRequired, Length, ValidationError
 import random
+import matplotlib
 import matplotlib.pyplot as plt
+matplotlib.use("Agg")  # Use the Agg backend for matplotlib
 from io import BytesIO
 import base64
+from gen_q import *
 import os
-import sqlite3
 
 print("Current Working Directory:", os.getcwd())
-
-with open("test_file.txt", "w") as f:
-    f.write("This is a test.")
-print("Test file written successfully!")
 
 # Initialize Flask app
 app = Flask(__name__, template_folder="app/templates")
 app.secret_key = "super-secret-key"
 
 # Configure the database
-#app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///ie201.db'
-#app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-import os
-
 if os.environ.get("DATABASE_URL"):
     app.config['SQLALCHEMY_DATABASE_URI'] = os.environ['DATABASE_URL'].replace("postgres://", "postgresql://", 1)
 else:
@@ -108,48 +101,52 @@ def login():
         if user and bcrypt.check_password_hash(user.password_hash, form.password.data):
             login_user(user)
             flash("You are now logged in!", "success")
-            return redirect(url_for('practice'))
+            return redirect(url_for('home'))
         else:
             flash("Invalid username or password. Please try again.", "danger")
     return render_template('login.html', form=form)
 
-
-
 @app.route("/practice", methods=["GET", "POST"])
 @login_required
 def practice():
-    """Render math problem with a number line plot."""
-    problem = generate_problem()
-    plot = None  # In case of a GET request, no image is initially shown
+    """Render practice problems (arithmetic or cash flow)."""
 
+    # Handle submission (POST request)
     if request.method == "POST":
-        user_answer = request.form.get("answer")
+        # Retrieve submitted answer and problem details
+        user_answer = float(request.form.get("answer"))
         correct_answer = float(request.form.get("correct_answer"))
         problem_type = request.form.get("problem_type")
 
-        # Update progress in the database for the logged-in user
+        # Record user progress in the database
         progress_entry = Progress.query.filter_by(user_id=current_user.id, problem_type=problem_type).first()
         if not progress_entry:
-            progress_entry = Progress(user_id=current_user.id, problem_type=problem_type, correct_count=0,
-                                      attempt_count=0)
+            progress_entry = Progress(user_id=current_user.id, problem_type=problem_type, correct_count=0, attempt_count=0)
             db.session.add(progress_entry)
 
         # Update progress counts
         progress_entry.attempt_count += 1
-        if user_answer and float(user_answer) == correct_answer:
+        if user_answer == correct_answer:
             progress_entry.correct_count += 1
             flash("Correct! Well done!", "success")
         else:
-            flash(f"Incorrect! The correct answer was {correct_answer}.", "error")
+            flash(f"Incorrect! The correct answer was ${correct_answer:.2f}.", "danger")
 
+        # Commit changes to progress and reload for the next question
         db.session.commit()
-        return redirect(url_for("practice"))
+        return redirect(url_for("practice"))  # Redirect to a new question
 
-    # Generate a plot for the current problem
-    plot = generate_number_line(problem["num1"], problem["num2"], problem["operation"])
+    # Handle fresh question generation (GET request)
+    else:
+        problem = generate_problem()  # Ensure a new problem is always generated
 
-    return render_template("question.html", problem=problem, plot=plot)
-
+        if problem["type"] in ["Irregular", "Uniform", "Gradient"]:
+            # Render cash flow problems
+            return render_template("question.html", problem=problem)
+        else:
+            # Generate plot for arithmetic problems
+            plot = generate_number_line(problem["num1"], problem["num2"], problem["operation"])
+            return render_template("question.html", problem=problem, plot=plot)
 
 @app.route("/progress")
 @login_required
@@ -161,6 +158,7 @@ def progress():
     ]
     return render_template("progress.html", progress=progress_data)
 
+
 @app.route('/logout')
 @login_required
 def logout():
@@ -168,47 +166,224 @@ def logout():
     flash("You have been logged out.", "info")
     return redirect(url_for('login'))
 
+from flask import session
 
-# Utility functions for generating problems and plots
-def generate_problem():
-    operations = {
-        "+": "Addition",
-        "-": "Subtraction",
-        "*": "Multiplication",
-        "/": "Division"
+@app.route("/interactive_table", methods=["GET", "POST"])
+@login_required
+def interactive_table():
+    from table_generator import generate_table
+    from genai_story_generator import generate_story
+
+    # Define hints mapping for each column
+    column_hints = {
+        "Int": "Interest Payment = Unpaid Balance × Annual Interest Rate",
+        "PPmt": "Principal Payment = Loan Payment - Interest Payment",
+        "UBA": "Unpaid Balance After Payment = Unpaid Balance - Principal Payment",
+        "AO": "Amount Owed = Unpaid Balance + Interest Payment",
+        "UIB": "Unpaid Interest Before Payment = Interest Payment (from previous year)",
+        "UIA": "Unpaid Interest After Payment = Unpaid Interest Before Payment - Interest Payment",
     }
 
-    num1 = random.randint(1, 20)
-    num2 = random.randint(1, 20)
-    operation = random.choice(list(operations.keys()))
+    if request.method == "POST":
+        action = request.form.get("action")
+        print(f"Action received: {action}")  # Debugging
 
-    if operation == "/":
-        while num2 == 0 or num1 % num2 != 0:
-            num1 = random.randint(1, 20)
-            num2 = random.randint(1, 20)
-        correct_answer = round(num1 / num2, 2)
-        question = f"What is {num1} ÷ {num2}?"
-    else:
-        question = f"What is {num1} {operation} {num2}?"
-        correct_answer = eval(f"{num1} {operation} {num2}")
+        if action == "new_table":
+            table, missing_cell, deferment_years = generate_table()
 
-    options = set()
-    while len(options) < 3:
-        lower_bound = int(correct_answer - 5)
-        upper_bound = int(correct_answer + 5)
-        options.add(random.randint(lower_bound, upper_bound))
-    options.add(correct_answer)
+            # Update session variables with new table and clear hint
+            session["table"] = table
+            session["missing_cell"] = missing_cell
+            session["story"] = None  # Clear the story if a new table is generated
+            session["show_hint"] = False  # Reset hint visibility
+            session["missing_column"] = missing_cell["Column"]  # Set the column being tested
+
+            # Generate story (retaining existing logic)
+            try:
+                initial_balance = table[0].get("UB", 0)
+                interest_rate = (table[0]["Int"] / initial_balance * 100) if initial_balance else 0
+                loan_payment = next((row.get("Ad", 0) for row in table if row.get("Ad", 0) > 0), 0)
+                num_years = len(table)
+
+                story_prompt = (
+                    f"Write a short word problem about a business or person who borrows ${initial_balance:,.2f} at an annual interest "
+                    f"rate of {interest_rate:.2f}%. Payments are deferred for {deferment_years} years before entering repayment. "
+                    f"The repayment plan involves annual payments of ${loan_payment:,.2f} over the next {num_years - deferment_years} years. "
+                    f"Describe the loan, deferral period, deferral years, and repayment terms without including explanations or solutions."
+                )
+                print(f"Generated Story Prompt: {story_prompt}")
+
+                story = generate_story(story_prompt)
+                session["story"] = story
+            except Exception as e:
+                print(f"Error while generating new table: {e}")
+                flash("An error occurred during table creation. Please try again.", "danger")
+
+            flash("New table and word problem generated!", "info")
+            return redirect(url_for("interactive_table"))
+
+        elif action == "validate":
+            try:
+                # Retrieve form inputs
+                user_input = float(request.form.get("user_input"))
+                missing_year = int(request.form.get("missing_year"))
+                missing_column = request.form.get("missing_column")
+
+                # Retrieve table and missing cell info from session
+                table = session.get("table")
+                missing_cell = session.get("missing_cell")
+                if not table or not missing_cell:
+                    flash("Error: Missing session data. Please generate a new table.", "danger")
+                    return redirect(url_for("interactive_table"))
+
+                # Find correct value for validation
+                if missing_cell["Year"] == missing_year and missing_cell["Column"] == missing_column:
+                    correct_value = missing_cell["CorrectValue"]
+                    tolerance = 10  # Use existing validation tolerance
+                    if abs(user_input - correct_value) <= tolerance:
+                        flash("Correct! Well done!", "success")
+                        session["show_hint"] = False  # Hide hint upon correct answer
+                        session["missing_column"] = None  # Reset column test tracking
+
+                        # Generate a new table for the next question
+                        table, missing_cell, deferment_years = generate_table()
+                        session["table"] = table
+                        session["missing_cell"] = missing_cell
+                        session["story"] = None
+                        return redirect(url_for("interactive_table"))
+                    else:
+                        flash(f"Incorrect! Try again. See hints for guidance.", "danger")
+                        session["show_hint"] = True  # Show hint upon incorrect answer
+
+                # Reload the same problem for retries
+                return redirect(url_for("interactive_table"))
+
+            except Exception as e:
+                print(f"Error during validation: {e}")
+                flash("An error occurred while validating your answer. Please try again.", "danger")
+                return redirect(url_for("interactive_table"))
+
+    # Handle GET requests (render the page based on session data)
+    table = session.get("table")
+    missing_cell = session.get("missing_cell")
+    story = session.get("story")
+    show_hint = session.get("show_hint", False)
+
+    # Generate initial data if missing
+    if not table or not missing_cell or not story:
+        table, missing_cell, deferment_years = generate_table()
+        session["table"] = table
+        session["missing_cell"] = missing_cell
+        session["missing_column"] = None
+        session["show_hint"] = False
+
+        try:
+            initial_balance = table[0].get("UB", 0)
+            interest_rate = (table[0]["Int"] / initial_balance * 100) if initial_balance else 0
+            loan_payment = next((row.get("Ad", 0) for row in table if row.get("Ad", 0) > 0), 0)
+            num_years = len(table)
+
+            story_prompt = (
+                f"Write a short word problem about a business or person who borrows ${initial_balance:,.2f} at an annual interest "
+                f"rate of {interest_rate:.2f}%. Payments are deferred for {deferment_years} years before entering repayment. "
+                f"The repayment plan involves annual payments of ${loan_payment:,.2f} over the next {num_years - deferment_years} years. "
+                f"Describe the loan, deferral period, deferral years, and repayment terms without including explanations or solutions."
+            )
+
+            print(f"Generated Story Prompt: {story_prompt}")
+            story = generate_story(story_prompt)
+            session["story"] = story
+        except Exception as e:
+            print(f"Error processing story during GET: {e}")
+            flash("Unable to generate the story. Please try again!", "danger")
+
+    # Add column-specific hints if a question is active
+    missing_column = session.get("missing_column", None)
+    hint = column_hints.get(missing_column, None) if show_hint and missing_column else None
+
+    return render_template(
+        "interactive_table.html",
+        table=table,
+        missing_cell=missing_cell,
+        story=story,
+        show_hint=show_hint,
+        hint=hint  # Pass hint to the template
+    )
+
+def generate_problem():
+    # Get user progress to calculate correctness percentages
+    user_progress = Progress.query.filter_by(user_id=current_user.id).all()
+
+    # Calculate correctness percentages (correct_count / attempt_count)
+    response_percentages = {}
+    for entry in user_progress:
+        if entry.attempt_count > 0:
+            response_percentages[entry.problem_type] = entry.correct_count / entry.attempt_count
+        else:
+            response_percentages[entry.problem_type] = 0.0
+
+    # Generate a random problem
+    problem = Problem()
+    problem.get_type(response_percentages)  # Adjusting type selection adaptively
+    problem.get_problem()
+
+    # Chart cash flows using matplotlib
+    plot = generate_cash_flow_chart(problem.cash_flows, problem.type, problem.i, problem.n, problem.sol)
+
+    # Multiple-choice options
+    correct_answer = round(problem.sol, 2)  # Round to 2 decimal places
+    options = {correct_answer}
+    while len(options) < 4:
+        options.add(round(correct_answer + random.uniform(-1000, 1000), 2))  # Ensure 4 unique options
+    options = list(options)
+    random.shuffle(options)
 
     return {
-        "question": question,
+        "type": problem.type,
+        "i": problem.i,
+        "n": problem.n,
+        "cash_flows": problem.cash_flows,
         "correct_answer": correct_answer,
-        "problem_type": operations[operation],
-        "num1": num1,
-        "num2": num2,
-        "operation": operation,
-        "options": list(options)
+        "options": options,
+        "plot": plot,
     }
 
+def generate_cash_flow_chart(cash_flows, problem_type, interest_rate, periods, solution):
+    fig, ax = plt.subplots(figsize=(10, 4))
+
+    # Plot cash flows as vertical bars
+    periods = list(cash_flows.keys())
+    flows = list(cash_flows.values())
+    ax.bar(periods, flows, width=0.3, color="blue", zorder=3)
+
+    # Dynamically set the Y-axis limit based on the highest cash flow
+    max_flow = max(flows) if flows else 0  # Safeguard against empty cash flows
+    ax.set_ylim(0, max_flow * 1.4)  # Add a buffer of 40% above the highest bar
+
+    # Add labels for each cash flow
+    for i, flow in enumerate(flows):
+        ax.text(
+            i,  # X position (center of each bar)
+            flow + (max_flow * 0.05),  # Slightly above each cash flow bar
+            f"${flow:,}",  # Format with comma separator
+            ha="center", va="bottom", fontsize=9  # Text styling
+        )
+
+    # Chart details
+    ax.set_title(f"Cash Flow Diagram (i={interest_rate * 100:.2f}%)", fontsize=14, pad=20)
+    ax.set_xlabel("Periods (n)", fontsize=12)
+    ax.set_ylabel("Cash Flow Amount", fontsize=12)
+    ax.axhline(0, color="black", linewidth=1.3)
+    ax.grid(True, linestyle="--", alpha=0.7)
+
+    # Convert plot to PNG for use in the template
+    buf = BytesIO()
+    plt.savefig(buf, format="png", bbox_inches="tight")
+    buf.seek(0)
+    encoded_image = base64.b64encode(buf.read()).decode("utf-8")
+    buf.close()
+    plt.close(fig)
+    return encoded_image
 
 def generate_number_line(num1, num2, operation):
     result = None
@@ -246,51 +421,3 @@ if __name__ == "__main__":
         db.create_all()  # Create the tables in the database
         print("Database tables creation is complete!")
     app.run(debug=True)
-
-with open("test_file.txt", "w") as f:
-    f.write("This is a test.")
-
-import os
-import sqlite3
-import os
-import sqlite3
-
-# Verify the database file exists
-db_path = "ie201.db"
-if not os.path.exists(db_path):
-    print(f"Database file '{db_path}' does not exist!")
-else:
-    print(f"Database file found at: {os.path.abspath(db_path)}")
-
-# Proceed with SQLite connection
-connection = sqlite3.connect(db_path)
-
-import sqlite3
-
-# Connect to your database
-connection = sqlite3.connect("ie201.db")
-
-# Create a cursor object to execute SQL commands
-cursor = connection.cursor()
-
-# List all tables
-cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-tables = cursor.fetchall()
-print("Tables in the database:")
-for table in tables:
-    print(table[0])
-
-# Check the schema of the `user` table
-cursor.execute("PRAGMA table_info(user);")
-print("\nSchema of the 'user' table:")
-for column in cursor.fetchall():
-    print(column)
-
-# Check the schema of the `progress` table
-cursor.execute("PRAGMA table_info(progress);")
-print("\nSchema of the 'progress' table:")
-for column in cursor.fetchall():
-    print(column)
-
-# Close the connection
-connection.close()

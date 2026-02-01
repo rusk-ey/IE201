@@ -1,47 +1,43 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Practice Questions</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body>
-    <div class="container mt-5">
-        <h2 class="text-primary">Solve the Following</h2>
+{% extends "base.html" %}
 
-        <!-- Feedback/Flash Messages -->
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }} mt-3">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
+{% block title %}Practice Problem{% endblock %}
 
-        <form method="POST">
-            <div class="mb-4">
-                <h4>{{ problem.question }}</h4>
-                <input type="hidden" name="correct_answer" value="{{ problem.correct_answer }}">
-                <input type="hidden" name="problem_type" value="{{ problem.problem_type }}">
-                {% for option in problem.options %}
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="answer" value="{{ option }}" id="option{{ loop.index }}">
-                        <label class="form-check-label" for="option{{ loop.index }}">{{ option }}</label>
-                    </div>
-                {% endfor %}
-            </div>
-            <button class="btn btn-primary">Submit</button>
-        </form>
+{% block content %}
+<h2 class="text-center">Practice Problem</h2>
 
-        <!-- Embed the Number Line Plot -->
-        {% if plot %}
-            <div class="mt-4">
-                <h5 class="text-primary">Number Line:</h5>
-                <img src="data:image/png;base64,{{ plot }}" class="img-fluid" alt="Number Line Plot">
-            </div>
-        {% endif %}
-
-        <a href="/" class="btn btn-secondary mt-4">Home</a>
+<!-- Dynamically Handle Different Problem Types -->
+{% if problem.type in ['Irregular', 'Uniform', 'Gradient'] %}
+    <!-- Cash Flow Problem -->
+    <div class="mt-4 text-center">
+        <img src="data:image/png;base64,{{ problem.plot }}" alt="Cash Flow Diagram" class="img-fluid">
     </div>
-</body>
-</html>
+    <div class="mt-4">
+        <p><strong>Interest Rate (i):</strong> {{ problem.i * 100 }}%</p>
+        <p><strong>Time Periods (n):</strong> {{ problem.n }}</p>
+    </div>
+{% else %}
+    <!-- Arithmetic Problem -->
+    <div class="mt-4">
+        <p><strong>Question:</strong> {{ problem.question }}</p>
+    </div>
+{% endif %}
+
+<!-- Multiple Choice Options -->
+<form method="POST">
+    <input type="hidden" name="problem_type" value="{{ problem.type }}">
+    <input type="hidden" name="correct_answer" value="{{ problem.correct_answer }}">
+
+    <p><strong>Choose an Answer:</strong></p>
+    <div class="mb-3">
+        {% for option in problem.options %}
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="answer" value="{{ option }}" id="option-{{ loop.index }}" required>
+                <label class="form-check-label" for="option-{{ loop.index }}">
+                    ${{ option }}
+                </label>
+            </div>
+        {% endfor %}
+    </div>
+    <button type="submit" class="btn btn-primary">Submit Answer</button>
+</form>
+{% endblock %}

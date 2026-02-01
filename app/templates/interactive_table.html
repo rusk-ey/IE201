@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Interactive Interest Table Practice{% endblock %}
+
+{% block content %}
+<h1 class="text-center text-primary mt-4">Interactive Table Practice</h1>
+<p class="text-center">Fill in the blank cell based on your calculations or generate a new table.</p>
+
+<form method="POST" action="{{ url_for('interactive_table') }}" id="interactiveForm">
+    <table class="table table-bordered text-center mt-4">
+        <thead class="table-light">
+            <tr>
+                <th>Year</th>
+                <th>Unpaid Balance (UB)</th>
+                <th>Interest During Year (Int)</th>
+                <th>Unpaid Interest Before Payment (UIB)</th>
+                <th>Amount Owed (AO)</th>
+                <th>Loan Payment </th>
+                <th>Interest Payment (IPmt)</th>
+                <th>Principal Payment (PPmt)</th>
+                <th>Unpaid Interest After Payment (UIA)</th>
+                <th>Unpaid Balance After Payment (UBA)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in table %}
+            <tr>
+                <td>{{ row.Year }}</td>
+                {% for column in ['UB', 'Int', 'UIB', 'AO', 'Ad', 'IPmt', 'PPmt', 'UIA', 'UBA'] %}
+                    <td>
+                        {% if row[column] is none %}
+                            <input type="number" name="user_input" class="form-control" placeholder="Enter value" required step="0.01" />
+                            <input type="hidden" name="missing_year" value="{{ row.Year }}" />
+                            <input type="hidden" name="missing_column" value="{{ missing_cell.Column }}" />
+                        {% else %}
+                            ${{ "{:,.2f}".format(row[column]) }}
+                        {% endif %}
+                    </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="text-center mt-4">
+        <button type="submit" name="action" value="validate" class="btn btn-primary">Submit Answer</button>
+        <button type="submit" name="action" value="new_table" class="btn btn-secondary" onclick="removeRequired()">Generate New Table</button>
+    </div>
+</form>
+
+<div class="mt-5">
+    <h2 class="text-primary">Word Problem</h2>
+    <p>{{ story }}</p>
+</div>
+
+{% if show_hint and hint %}
+<div class="alert alert-info mt-3" role="alert">
+    <strong>Hint:</strong> {{ hint }}
+</div>
+{% endif %}
+
+<script>
+    function removeRequired() {
+        const userInputs = document.querySelectorAll("[name='user_input']");
+        userInputs.forEach(input => input.removeAttribute("required"));
+    }
+</script>
+{% endblock %}
