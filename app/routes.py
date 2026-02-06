@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from .models import db, StudentProgress, generate_problem, check_answer
 
+
 main = Blueprint('main', __name__)
 
 @main.route("/")

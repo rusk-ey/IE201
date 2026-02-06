@@ -1,9 +1,21 @@
 from flask_sqlalchemy import SQLAlchemy
 import random
 
-db = SQLAlchemy()
+from app import db
+
+#db = SQLAlchemy()
+
+def initialize_database(app):
+    """
+    Initializes the database and applies all table creations when
+    the app context starts.
+    """
+    with app.app_context():
+        db.create_all()
+
 
 class StudentProgress(db.Model):
+    __tablename__ = 'student_progress'
     id = db.Column(db.Integer, primary_key=True)
     student_id = db.Column(db.Integer, nullable=False)
     problem_type = db.Column(db.String(20), nullable=False)

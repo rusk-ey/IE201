@@ -28,12 +28,14 @@
                 <td>{{ row.Year }}</td>
                 {% for column in ['UB', 'Int', 'UIB', 'AO', 'Ad', 'IPmt', 'PPmt', 'UIA', 'UBA'] %}
                     <td>
-                        {% if row[column] is none %}
-                            <input type="number" name="user_input" class="form-control" placeholder="Enter value" required step="0.01" />
-                            <input type="hidden" name="missing_year" value="{{ row.Year }}" />
-                            <input type="hidden" name="missing_column" value="{{ missing_cell.Column }}" />
+                        {% if row.Year == missing_cell.Year and column == missing_cell.Column %}
+                            <!-- Render a blank input field -->
+                            <input type="number" name="user_input" class="form-control" placeholder="Enter value" required step="0.01">
+                            <input type="hidden" name="missing_year" value="{{ row.Year }}">
+                            <input type="hidden" name="missing_column" value="{{ missing_cell.Column }}">
                         {% else %}
-                            ${{ "{:,.2f}".format(row[column]) }}
+                            <!-- Render numerical data or blank -->
+                            {{ '{:,.2f}'.format(row[column]) if row[column] is not none else '$$BLANK$$' }}
                         {% endif %}
                     </td>
                 {% endfor %}
@@ -47,16 +49,65 @@
     </div>
 </form>
 
+<!-- Display the Word Problem -->
 <div class="mt-5">
     <h2 class="text-primary">Word Problem</h2>
     <p>{{ story }}</p>
 </div>
 
+<!-- Hint Section -->
 {% if show_hint and hint %}
 <div class="alert alert-info mt-3" role="alert">
-    <strong>Hint:</strong> {{ hint }}
+    <strong>Hint:</strong> \( {{ hint }} \)
 </div>
 {% endif %}
+
+<!-- Ask Gemini Section -->
+<div class="mt-5">
+    <h2 class="text-primary">Ask a Question</h2>
+    <form method="POST" action="{{ url_for('interactive_table') }}">
+        <input type="hidden" name="action" value="ask_question">
+        <div class="mb-3">
+            <label for="custom_question" class="form-label">Have a question about this problem? Ask here:</label>
+            <textarea
+                class="form-control"
+                name="custom_question"
+                id="custom_question"
+                rows="3"
+                placeholder="Example: What is the formula for Unpaid Interest Before Payment?"
+                required
+            ></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary mt-3">Ask Gemini</button>
+    </form>
+
+    <!-- Display Gemini's Response -->
+    {% if gemini_answer %}
+    <div class="alert alert-success mt-3" role="alert">
+        <strong>Gemini's Answer:</strong>
+        <div class="markdown-content"> <!-- Markdown content container -->
+            {{ gemini_answer|safe }} <!-- Render response safely -->
+        </div>
+        <!-- Wrap Math expression to trigger MathJax -->
+        <script>
+            if (typeof MathJax !== 'undefined' && MathJax.typeset) {
+                MathJax.typesetPromise().then(() => {
+                    console.log('MathJax rendered LaTeX math successfully');
+                }).catch((err) => console.error('MathJax rendering error:', err));
+            }
+        </script>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Test MathJax rendering -->
+<div id="latex-example">
+    <p>Here is an example of inline math: \( a^2 + b^2 = c^2 \)</p>
+    <p>Here is a block-level equation:</p>
+    \[
+        E = mc^2
+    \]
+</div>
 
 <script>
     function removeRequired() {
@@ -65,3 +116,18 @@
     }
 </script>
 {% endblock %}
+
+<!-- MathJax -->
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\\(', '\\)']],
+            displayMath: [['$$', '$$'], ['\\[', '\\]']],
+            processEscapes: true
+        },
+        options: {
+            skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>

@@ -4,7 +4,7 @@ import random
 def generate_table():
     """Generate a realistic interactive table with deferred payments and precise loan payment calculations."""
     num_years = random.randint(4, 8)  # Number of years (total period of the loan)
-    deferment_years = random.randint(0, num_years - 2)  # Deferment period (0 means immediate payments)
+    deferment_years = random.randint(1, num_years - 2)  # Deferment period (0 means immediate payments)
     interest_rate = random.randint(5, 15) / 100  # Annual interest rate (5% to 15%)
     initial_balance = random.randint(1, 20) * 1000  # Initial loan balance ($1,000 to $20,000)
 

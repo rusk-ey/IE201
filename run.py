@@ -167,6 +167,8 @@ def logout():
     return redirect(url_for('login'))
 
 from flask import session
+import random
+import json
 
 @app.route("/interactive_table", methods=["GET", "POST"])
 @login_required
@@ -174,7 +176,7 @@ def interactive_table():
     from table_generator import generate_table
     from genai_story_generator import generate_story
 
-    # Define hints mapping for each column
+    # Hints and Story Logic – Already Working, No Changes Required
     column_hints = {
         "Int": "Interest Payment = Unpaid Balance × Annual Interest Rate",
         "PPmt": "Principal Payment = Loan Payment - Interest Payment",
@@ -183,121 +185,238 @@ def interactive_table():
         "UIB": "Unpaid Interest Before Payment = Interest Payment (from previous year)",
         "UIA": "Unpaid Interest After Payment = Unpaid Interest Before Payment - Interest Payment",
     }
+    AI_gen = False  # Flag for dynamic story generation
+    import os
+    JSON_FILE = os.path.join(os.path.dirname(__file__), "formatted_scenario_strings.json")
+
+    def fetch_story_from_json(**kwargs):
+        try:
+            with open(JSON_FILE, "r") as f:
+                stories = json.load(f)
+                story_template = random.choice(stories)
+                return story_template.format(**kwargs)
+        except Exception as e:
+            print(f"Error reading story from JSON: {e}")
+            return "Error fetching story. Please ensure the JSON file is formatted correctly."
 
     if request.method == "POST":
         action = request.form.get("action")
-        print(f"Action received: {action}")  # Debugging
+        print(f"Action received: {action}")
 
         if action == "new_table":
+            # Generate a new table and missing cell
             table, missing_cell, deferment_years = generate_table()
 
-            # Update session variables with new table and clear hint
             session["table"] = table
             session["missing_cell"] = missing_cell
-            session["story"] = None  # Clear the story if a new table is generated
-            session["show_hint"] = False  # Reset hint visibility
-            session["missing_column"] = missing_cell["Column"]  # Set the column being tested
+            session["story"] = None
+            session["show_hint"] = False
+            session["missing_column"] = missing_cell["Column"]
 
-            # Generate story (retaining existing logic)
+            # Generate or fetch a story
             try:
                 initial_balance = table[0].get("UB", 0)
                 interest_rate = (table[0]["Int"] / initial_balance * 100) if initial_balance else 0
                 loan_payment = next((row.get("Ad", 0) for row in table if row.get("Ad", 0) > 0), 0)
                 num_years = len(table)
 
-                story_prompt = (
-                    f"Write a short word problem about a business or person who borrows ${initial_balance:,.2f} at an annual interest "
-                    f"rate of {interest_rate:.2f}%. Payments are deferred for {deferment_years} years before entering repayment. "
-                    f"The repayment plan involves annual payments of ${loan_payment:,.2f} over the next {num_years - deferment_years} years. "
-                    f"Describe the loan, deferral period, deferral years, and repayment terms without including explanations or solutions."
-                )
-                print(f"Generated Story Prompt: {story_prompt}")
+                if AI_gen:
+                    story_prompt = (
+                        f"Write a short word problem about a business or person who borrows ${initial_balance:,.2f} "
+                        f"at an annual interest rate of {interest_rate:.2f}%. Payments are deferred for {deferment_years} years before "
+                        f"entering repayment. The repayment plan involves annual payments of ${loan_payment:,.2f} over the next "
+                        f"{num_years - deferment_years} years."
 
-                story = generate_story(story_prompt)
+                        "\n\n**Additional Requirements:**\n"
+                        "- The word problem must use the following style and terminology as demonstrated in these examples:\n"
+                        "    - A local startup, Horizon Tech, secures a business loan of ${initial_balance} to fund its initial operations. "
+                        "The loan accrues interest at an annual rate of {interest_rate}%, and all payments are deferred for the first "
+                        "{deferment_years} years. After this deferment period ends, the company enters a repayment schedule consisting of "
+                        "fixed annual payments of ${loan_payment} for a term of {repayment_years} years.\n"
+                        "    - A tech startup secures a loan of ${initial_balance} to cover initial research and development costs at an annual "
+                        "interest rate of {interest_rate}%. Under the terms of the agreement, all payments are deferred for the first "
+                        "{deferment_years} years. Following this deferral period, the startup enters a repayment phase requiring annual payments "
+                        "of ${loan_payment} over a duration of {repayment_years} years.\n"
+                        "    - A small tech startup secures a business loan of ${initial_balance} to fund the development of a new software platform. "
+                        "The loan carries an annual interest rate of {interest_rate}%. According to the agreement, the company is granted a deferment "
+                        "period of {deferment_years} years, during which no payments are required. Following the conclusion of this deferral period, "
+                        "the startup enters a repayment phase consisting of fixed annual payments of ${loan_payment} for a duration of {repayment_years} years."
+                        "\n- The word problem must strictly follow this vocabulary and tone, and avoid using any new or unapproved terminology beyond these examples."
+                        "\n- Your response will be evaluated for compliance with these rules."
+                    )
+
+                    print(f"Generated Story Prompt: {story_prompt}")
+                    story = generate_story(story_prompt)
+                else:
+                    story = fetch_story_from_json(
+                        initial_balance=f"{initial_balance:,.2f}",
+                        interest_rate=f"{interest_rate:.2f}",
+                        deferment_years=str(deferment_years),
+                        loan_payment=f"{loan_payment:,.2f}",
+                        repayment_years=str(num_years - deferment_years),
+                    )
                 session["story"] = story
             except Exception as e:
-                print(f"Error while generating new table: {e}")
-                flash("An error occurred during table creation. Please try again.", "danger")
+                print(f"Error generating or fetching story: {e}")
+                flash("Unable to generate story. Please try again.", "danger")
 
             flash("New table and word problem generated!", "info")
             return redirect(url_for("interactive_table"))
 
+        elif action == "ask_question":
+            # Handling student questions for Gemini
+            try:
+                user_question = request.form.get("custom_question", "").strip()
+                if not user_question:
+                    flash("Please enter a valid question!", "warning")
+                    return redirect(url_for("interactive_table"))
+
+                # Introduce PromptLevel variable
+                PromptLevel = 1  # Default is detailed prompt, update this dynamically as needed (or user-configurable)
+
+                # Retrieve context from session
+                table = session.get("table", [])
+                missing_cell = session.get("missing_cell", {})
+                story = session.get("story", "No story available.")
+                principal_amount = table[0].get("UB", "Unknown") if table else "Unknown"
+                interest_rate = (
+                    (table[0].get("Int", 0) / principal_amount * 100) if principal_amount else "Unknown"
+                )
+                total_loan_period = len(table)
+                deferment_period = session.get("deferment_period", "Unknown")
+                annual_payment = next((row.get("Ad", 0) for row in table if row.get("Ad", 0) > 0), "Unknown")
+
+                # Build the table as part of the prompt
+                table_prompt = ""
+                for row in table[:5]:  # Limit rows for simplicity
+                    table_prompt += (
+                        f"| {row['Year']} | "
+                        f"{'BLANK' if row['UB'] is None else row['UB']} | "
+                        f"{'BLANK' if row['Int'] is None else row['Int']} | "
+                        f"{'BLANK' if row['UIB'] is None else row['UIB']} | "
+                        f"{row['AO']} | {row['Ad']} | "
+                        f"{'BLANK' if row['IPmt'] is None else row['IPmt']} | "
+                        f"{'BLANK' if row['PPmt'] is None else row['PPmt']} | "
+                        f"{row['UIA']} | {row['UBA']} |\n"
+                    )
+
+                # Generate detailed or simple prompts based on PromptLevel
+                if PromptLevel == 1:
+                    # Detailed prompt (PromptLevel = 1)
+                    prompt = f"""
+                    You are a chatbot embedded within an interactive educational tool designed to help undergraduate students in a financial engineering course (Engineering Economy). 
+
+                    **Scenario Context:**
+                    This tool is used to teach students about loan repayment, interest, including Unpaid Balance (UB), Interest Payment (Int), Principal Payment (PPmt), and other finance-related topics. 
+                    Always ensure the vocabulary and terminology in your responses exactly match the wording used in the provided story question below.
+
+                    **Rules for Answering Questions:**
+                    - Do not fully calculate the solution for any blank. Instead, guide the student by providing:
+                        - The correct formula or equations.
+                        - Definitions of variables as they relate to the table and story prompt.
+                        - General financial principles and reasoning.
+                        - Example calculations from other rows in the table to demonstrate general methods applicable to their blank value.
+                        - Hints to help the user figure out the problem for themselves.
+                    - Do NOT reveal the solution to any blank cell directly in your response.
+
+                    **Word Problem Context**:
+                    {story}
+
+                    **Relevant Loan Details:**
+                    - Principal Loan Amount: {principal_amount} USD
+                    - Annual Interest Rate: {interest_rate}%
+                    - Total Loan Period: {total_loan_period} years
+                    - Deferment Period: {deferment_period} years
+                    - Loan Repayment Amount Per Year (after deferment): {annual_payment} USD
+
+                    **Loan Table (Partial View)**:
+                    Below is the loan table generated for this question. Use this table to provide context for your answer. If a value is missing, it is represented as `BLANK`.
+
+                    | Year | UB (Unpaid Balance) | Int (Interest Payment) | UIB (Unpaid Interest Before Payment) | AO (Amount Owed) | Ad (Loan Payment) | IPmt (Interest Payment) | PPmt (Principal Payment) | UIA (Unpaid Interest After Payment) | UBA (Unpaid Balance After Payment) |
+                    |------|---------------------|------------------------|---------------------------------------|------------------|-------------------|--------------------------|---------------------------|--------------------------------------|------------------------------------|
+                    {table_prompt}
+
+                    **Student Question**:
+                    "{user_question}"
+
+                    **Specific Blank Context**:
+                    The student is focused on calculating the value for the `{missing_cell.get('Column', 'Unknown')}` in year `{missing_cell.get('Year', 'Unknown')}`.
+
+                    **Instructions for Answering**:
+                    - Your role is to guide students in understanding the concepts, not to provide full numerical answers to their specific problem.
+                    - Try to provide concrete tips, insights, or partial steps to help the student learn how to solve the problem on their own.
+                    - Avoid introducing new terminology or format conventions. Stick to the vocabulary and phrasing used in the word problem.
+                    - If applicable, use other rows from the table as examples to demonstrate principles or calculations.
+            - Always write math descriptions and equations in plain text instead of using LaTeX. For example:
+              - Write `A = B * C` instead of `$A = B \\times C$`.
+              - Include simple plain English descriptions where necessary.
+            
+
+                    Always focus your response on being concise, helpful, and relevant to THIS specific problem.
+                    """
+                else:
+                    # Simple prompt (PromptLevel = 0)
+                    prompt = f"The student has asked the following question:\n\n{user_question}\n\nPlease provide a concise and clear explanation to help the student understand the concept."
+
+                # Logging the prompt (for debugging purposes)
+                print(f"Generated Gemini Prompt:\n{prompt}")
+
+                # Send prompt to Gemini and capture the response (mocked here)
+                gemini_response = generate_story(prompt)  # Replace with actual Gemini API call
+
+                # Convert Markdown response into HTML for frontend rendering
+                from markdown import markdown
+                gemini_response_html = markdown(gemini_response)
+
+                # Store the rendered response into the session
+                session["gemini_answer"] = gemini_response_html
+                flash("Gemini has answered your question!", "success")
+            except Exception as e:
+                print(f"Error while submitting question to Gemini: {e}")
+                flash("An error occurred while processing your question. Please try again.", "danger")
+
+            return redirect(url_for("interactive_table"))
+
         elif action == "validate":
             try:
-                # Retrieve form inputs
                 user_input = float(request.form.get("user_input"))
                 missing_year = int(request.form.get("missing_year"))
                 missing_column = request.form.get("missing_column")
 
-                # Retrieve table and missing cell info from session
                 table = session.get("table")
                 missing_cell = session.get("missing_cell")
                 if not table or not missing_cell:
                     flash("Error: Missing session data. Please generate a new table.", "danger")
                     return redirect(url_for("interactive_table"))
 
-                # Find correct value for validation
                 if missing_cell["Year"] == missing_year and missing_cell["Column"] == missing_column:
                     correct_value = missing_cell["CorrectValue"]
-                    tolerance = 10  # Use existing validation tolerance
+                    tolerance = 10
                     if abs(user_input - correct_value) <= tolerance:
-                        flash("Correct! Well done!", "success")
-                        session["show_hint"] = False  # Hide hint upon correct answer
-                        session["missing_column"] = None  # Reset column test tracking
+                        flash("Correct! Great job!", "success")
+                        session["show_hint"] = False
 
-                        # Generate a new table for the next question
+                        # Generate new table for next question
                         table, missing_cell, deferment_years = generate_table()
                         session["table"] = table
                         session["missing_cell"] = missing_cell
                         session["story"] = None
                         return redirect(url_for("interactive_table"))
                     else:
-                        flash(f"Incorrect! Try again. See hints for guidance.", "danger")
-                        session["show_hint"] = True  # Show hint upon incorrect answer
+                        flash("Incorrect! Try again.", "danger")
+                        session["show_hint"] = True
 
-                # Reload the same problem for retries
                 return redirect(url_for("interactive_table"))
 
             except Exception as e:
                 print(f"Error during validation: {e}")
-                flash("An error occurred while validating your answer. Please try again.", "danger")
+                flash("Validation failed. Please try again.", "danger")
                 return redirect(url_for("interactive_table"))
 
-    # Handle GET requests (render the page based on session data)
     table = session.get("table")
     missing_cell = session.get("missing_cell")
     story = session.get("story")
     show_hint = session.get("show_hint", False)
-
-    # Generate initial data if missing
-    if not table or not missing_cell or not story:
-        table, missing_cell, deferment_years = generate_table()
-        session["table"] = table
-        session["missing_cell"] = missing_cell
-        session["missing_column"] = None
-        session["show_hint"] = False
-
-        try:
-            initial_balance = table[0].get("UB", 0)
-            interest_rate = (table[0]["Int"] / initial_balance * 100) if initial_balance else 0
-            loan_payment = next((row.get("Ad", 0) for row in table if row.get("Ad", 0) > 0), 0)
-            num_years = len(table)
-
-            story_prompt = (
-                f"Write a short word problem about a business or person who borrows ${initial_balance:,.2f} at an annual interest "
-                f"rate of {interest_rate:.2f}%. Payments are deferred for {deferment_years} years before entering repayment. "
-                f"The repayment plan involves annual payments of ${loan_payment:,.2f} over the next {num_years - deferment_years} years. "
-                f"Describe the loan, deferral period, deferral years, and repayment terms without including explanations or solutions."
-            )
-
-            print(f"Generated Story Prompt: {story_prompt}")
-            story = generate_story(story_prompt)
-            session["story"] = story
-        except Exception as e:
-            print(f"Error processing story during GET: {e}")
-            flash("Unable to generate the story. Please try again!", "danger")
-
-    # Add column-specific hints if a question is active
     missing_column = session.get("missing_column", None)
     hint = column_hints.get(missing_column, None) if show_hint and missing_column else None
 
@@ -307,7 +426,8 @@ def interactive_table():
         missing_cell=missing_cell,
         story=story,
         show_hint=show_hint,
-        hint=hint  # Pass hint to the template
+        hint=hint,
+        gemini_answer=session.get("gemini_answer")  # Pass Gemini answer if available
     )
 
 def generate_problem():
