@@ -106,14 +106,6 @@ Contains approved example word problems that define acceptable terminology.
 - Defines approved vocabulary (e.g., "deferred," "repayment phase," "annual payments")
 - Used to evaluate whether AI responses use appropriate terminology
 
-**Format:**
-```json
-[
-    "A local startup, Horizon Tech, secures a business loan of ${initial_balance}...",
-    "A tech startup secures a loan of ${initial_balance}...",
-    ...
-]
-
 ### Evaluation and Testing Files
 
 #### **7. `gemini_evaluation.py`**
